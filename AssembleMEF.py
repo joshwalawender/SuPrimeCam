@@ -80,7 +80,7 @@ def assemble_MEF(file0, outdir=None):
             chhdu.header.set('CCDSUM', f'{binx:d} {biny:d}')
             chhdu.header.set('FILTER', hdul[0].header.get('FILTER01'))
             # OBSTYPE: "zero", "dark", flat", and "object"
-            obstype_trans = {'DOMEFLAT': 'flat', 'SKYFLAT': 'twiflat',
+            obstype_trans = {'DOMEFLAT': 'flat', 'SKYFLAT': 'flat',
                              'BIAS': 'zero', 'OBJECT': 'object', 'DARK': 'dark'}
             hdrtype = hdul[0].header.get('DATA-TYP').strip()
             if hdrtype not in obstype_trans.keys():
@@ -104,6 +104,13 @@ def assemble_MEF(file0, outdir=None):
             datasec = f'[{DATASECx1:d}:{DATASECx2:d},{DATASECy1:d}:{DATASECy2:d}]'
             chhdu.header.set('DATASEC', datasec)
 
+            CCDSECx1 = 1
+            CCDSECx2 = DATASECx2 - DATASECx1 + 1
+            CCDSECy1 = 1
+            CCDSECy2 = DATASECy2 - DATASECy1 + 1
+            ccdsec = f'[{CCDSECx1:d}:{CCDSECx2:d},{CCDSECy1:d}:{CCDSECy2:d}]'
+            chhdu.header.set('CCDSEC', ccdsec)
+
             detsecy = {True: 2, False: 1}[dety > 0]
             ampwidth = maxxef[ch] - minxef[ch]
             chipwidth = 4 * ampwidth
@@ -126,7 +133,7 @@ def assemble_MEF(file0, outdir=None):
     return MEF
     
 if __name__ == '__main__':
-    raw0_files = glob('/Users/jwalawender/SuPrimeCam/SuPrimeCam_S17A-UH16A/o16308/SUPA*0.fits')
+    raw0_files = glob('/Volumes/ScienceData/SuPrimeCam_S17A-UH16A/o16308/SUPA*0.fits')
     for file in raw0_files:
-        assemble_MEF(file, outdir='~/SuPrimeCam/SuPrimeCam_S17A-UH16A/Processed/Raw')
+        assemble_MEF(file, outdir='/Volumes/ScienceData/SuPrimeCam_S17A-UH16A/Processed/MEF')
 
