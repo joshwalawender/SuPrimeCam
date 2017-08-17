@@ -62,11 +62,12 @@ def assemble_MEF(file0, outdir=None):
 
         for ch in [1,2,3,4]:
             extver += 1
-            miny = min([minyos[ch], minyef[ch]])
-            minx = min([minxos[ch], minxef[ch]])
-            maxy = max([maxyos[ch], maxyef[ch]])
-            maxx = max([maxxos[ch], maxxef[ch]])
-            chdata = hdul[0].data[miny:maxy,minx:maxx]
+#             miny = min([minyos[ch], minyef[ch]])
+#             minx = min([minxos[ch], minxef[ch]])
+#             maxy = max([maxyos[ch], maxyef[ch]])
+#             maxx = max([maxxos[ch], maxxef[ch]])
+#             chdata = hdul[0].data[miny:maxy,minx:maxx]
+            chdata = hdul[0].data[minyef[ch]:maxyef[ch],minxef[ch]:maxxef[ch]]
             if extver == 1:
                 phdu = fits.PrimaryHDU(None, hdul[0].header)
                 MEF.append(phdu)
@@ -90,26 +91,12 @@ def assemble_MEF(file0, outdir=None):
             obstype = obstype_trans[hdrtype]
             chhdu.header.set('OBSTYPE', obstype)
 
-            BIASSECx1 = minxos[ch] - minx + 1
-            BIASSECx2 = maxxos[ch] - minx
-            BIASSECy1 = minyef[ch] - miny + 1
-            BIASSECy2 = maxyef[ch] - miny
-            biassec = f'[{BIASSECx1:d}:{BIASSECx2:d},{BIASSECy1:d}:{BIASSECy2:d}]'
-            chhdu.header.set('BIASSEC', biassec)
-
-            DATASECx1 = minxef[ch] - minx + 1
-            DATASECx2 = maxxef[ch] - minx
-            DATASECy1 = minyef[ch] - miny + 1
-            DATASECy2 = maxyef[ch] - miny
+            DATASECx1 = 1
+            DATASECx2 = maxxef[ch] - minxef[ch]
+            DATASECy1 = 1
+            DATASECy2 = maxyef[ch] - minyef[ch]
             datasec = f'[{DATASECx1:d}:{DATASECx2:d},{DATASECy1:d}:{DATASECy2:d}]'
             chhdu.header.set('DATASEC', datasec)
-
-            CCDSECx1 = 1
-            CCDSECx2 = DATASECx2 - DATASECx1 + 1
-            CCDSECy1 = 1
-            CCDSECy2 = DATASECy2 - DATASECy1 + 1
-            ccdsec = f'[{CCDSECx1:d}:{CCDSECx2:d},{CCDSECy1:d}:{CCDSECy2:d}]'
-            chhdu.header.set('CCDSEC', ccdsec)
 
             detsecy = {True: 2, False: 1}[dety > 0]
             ampwidth = maxxef[ch] - minxef[ch]
@@ -124,9 +111,19 @@ def assemble_MEF(file0, outdir=None):
                 DETSECx1 = 1 * chipwidth + (maxxef[ch] - ampwidth - minxef[ch] % ampwidth) + 1
             else:
                 DETSECx1 = 0 * chipwidth + (maxxef[ch] - ampwidth - minxef[ch] % ampwidth) + 1
-            DETSEXx2 = DETSECx1 + ampwidth -1
-            chhdu.header.set('DETSEC', f'[{DETSECx1:d}:{DETSEXx2:d},{DETSECy1:d}:{DETSECy2:d}]')
+            DETSECx2 = DETSECx1 + ampwidth -1
+            chhdu.header.set('DETSEC', f'[{DETSECx1:d}:{DETSECx2:d},{DETSECy1:d}:{DETSECy2:d}]')
             MEF.append(chhdu)
+
+            CCDSECx1 = 1
+            CCDSECx2 = DETSECx2 - DETSECx1 + 1
+            CCDSECy1 = 1
+            CCDSECy2 = DETSECy2 - DETSECy1 + 1
+            ccdsec = f'[{CCDSECx1:d}:{CCDSECx2:d},{CCDSECy1:d}:{CCDSECy2:d}]'
+            chhdu.header.set('CCDSEC', ccdsec)
+
+
+
     if outdir is not None:
         outfile = os.path.join(outdir, filename0.replace('SUPA', 'MEF_'))
         MEF.writeto(outfile, overwrite=True)
@@ -134,6 +131,7 @@ def assemble_MEF(file0, outdir=None):
     
 if __name__ == '__main__':
     raw0_files = glob('/Volumes/ScienceData/SuPrimeCam_S17A-UH16A/o16308/SUPA*0.fits')
+#     raw0_files = glob('/Volumes/ScienceData/SuPrimeCam_S17A-UH16A/o16308/SUPA015642*0.fits')
     for file in raw0_files:
         assemble_MEF(file, outdir='/Volumes/ScienceData/SuPrimeCam_S17A-UH16A/Processed/MEF')
 
