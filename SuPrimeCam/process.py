@@ -7,6 +7,7 @@ import logging
 from astropy import units as u
 from astropy.io import fits
 from astropy.nddata import CCDData
+from astropy.table import Table
 
 ##-------------------------------------------------------------------------
 ## Create logger object
@@ -232,12 +233,21 @@ def fits_MEFdata_reader(file, defaultunit='adu', datatype=MEFData):
 ##-------------------------------------------------------------------------
 def process(MEF40path):
     MEF40path = Path(MEF40path).expanduser()
-    files = [f for f in MEF40path.glob('*.fits')]
 
-    MEF = fits_MEFdata_reader(files[0])
-    print(len(MEF.headers))
-    print(len(MEF.pixeldata))
-    print(MEF.get('DATA-TYP'))
+    tablefile = MEF40path.parent.joinpath('files.txt')
+    if tablefile.exists() is True:
+        print(f"Reading {tablefile}")
+        t = Table.read(tablefile, format='ascii.csv')
+    else:
+        t = Table(names=('file', 'imtype'),
+                  dtype=('a200',  'a12') )
+        for file in MEF40path.glob('MEF*.fits'):
+            MEF = fits_MEFdata_reader(file)
+            t.add_row((file, MEF.get('DATA-TYP')))
+        t.write(tablefile, format='ascii.csv')
+
+    print(t)
+
 
 
 if __name__ == '__main__':
