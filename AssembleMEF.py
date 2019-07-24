@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 from glob import glob
 from astropy import units as u
@@ -130,8 +131,12 @@ def assemble_MEF(file0, outdir=None):
     return MEF
     
 if __name__ == '__main__':
-    raw0_files = glob('/Volumes/ScienceData/SuPrimeCam_S17A-UH16A/o16308/SUPA*0.fits')
-#     raw0_files = glob('/Volumes/ScienceData/SuPrimeCam_S17A-UH16A/o16308/SUPA015642*0.fits')
+    raw0_path = Path('/Volumes/ScienceData/SuPrimeCam/SuPrimeCam_S17A-UH16A/o16308/')
+    raw0_files = [f for f in raw0_path.glob('SUPA*0.fits')]
+
+    print(f"Found {len(raw0_files)} SuPrimeCam images.")
+
     for file in raw0_files:
-        assemble_MEF(file, outdir='/Volumes/ScienceData/SuPrimeCam_S17A-UH16A/Processed/MEF')
+        print(f'Assembling MEF for {file.name}')
+        assemble_MEF(file, outdir='/Volumes/ScienceData/SuPrimeCam/SuPrimeCam_S17A-UH16A/Processed/MEF')
 
