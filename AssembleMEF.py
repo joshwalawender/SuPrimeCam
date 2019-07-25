@@ -73,6 +73,8 @@ def assemble_MEF(file0, outdir=None):
                 phdu = fits.PrimaryHDU(None, hdul[0].header)
                 MEF.append(phdu)
             chhdu = fits.ImageHDU(chdata, hdul[0].header, name=f'd{detid}c{ch}')
+            chhdu.header.set('GAIN', hdul[0].header.get(f'S_GAIN{ch}'),
+                             f"AD conversion factor (electron/ADU) for ch{ch}")
             chhdu.header.set('EXTNAME', f'im{extver}')
             chhdu.header.set('EXTVER', extver)
             chhdu.header.set('IMAGEID', f'd{detid}c{ch}')
