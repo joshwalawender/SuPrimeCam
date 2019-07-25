@@ -9,6 +9,8 @@ from astropy.io import fits
 from astropy.nddata import CCDData
 from astropy.table import Table
 
+import ccdproc
+
 ##-------------------------------------------------------------------------
 ## Create logger object
 ##-------------------------------------------------------------------------
@@ -120,6 +122,18 @@ class MEFData(object):
             if val is not None:
                 return val
 
+    def create_deviation(self, readnoise=10):
+        for i,pd in enumerate(self.pixeldata):
+            gain = pd.header.get('GAIN')
+            self.pixeldata[i] = ccdproc.create_deviation(
+                pd, gain=gain * u.electron/u.adu,
+                readnoise=readnoise * u.electron)
+
+    def gain_correct(self):
+        for i,pd in enumerate(self.pixeldata):
+            gain = pd.header.get('GAIN')
+            self.pixeldata[i] = ccdproc.gain_correct(pd, gain*u.electron/u.adu)
+
 
 ##-------------------------------------------------------------------------
 ## Get HDU Type
@@ -187,11 +201,11 @@ def fits_MEFdata_reader(file, defaultunit='adu', datatype=MEFData):
     # Loop though HDUs and read them in as pixel data or table data
     md = datatype()
     while len(hdul) > 0:
-        print('Extracting HDU')
+#         print('Extracting HDU')
         hdu = hdul.pop(0)
         md.headers.append(hdu.header)
         hdu_type = get_hdu_type(hdu)
-        print(f'  Got HDU type = {hdu_type}')
+#         print(f'  Got HDU type = {hdu_type}')
         if hdu_type == 'header':
             pass
         elif hdu_type == 'tabledata':
@@ -221,9 +235,9 @@ def fits_MEFdata_reader(file, defaultunit='adu', datatype=MEFData):
                         unit=(hdu.header.get('BUNIT', defaultunit)).lower(),
                        )
             md.pixeldata.append(c)
-    print(f'Read in {len(md.headers)} headers, '
-          f'{len(md.pixeldata)} sets of pixel data, '
-          f'and {len(md.tabledata)} tables')
+#     print(f'Read in {len(md.headers)} headers, '
+#           f'{len(md.pixeldata)} sets of pixel data, '
+#           f'and {len(md.tabledata)} tables')
     md.verify()
     return md
 
@@ -234,6 +248,7 @@ def fits_MEFdata_reader(file, defaultunit='adu', datatype=MEFData):
 def process(MEF40path):
     MEF40path = Path(MEF40path).expanduser()
 
+    # Create table of files
     tablefile = MEF40path.parent.joinpath('files.txt')
     if tablefile.exists() is True:
         print(f"Reading {tablefile}")
@@ -248,6 +263,18 @@ def process(MEF40path):
 
     print(t)
 
+    ##-------------------------------------------------------------------------
+    ## Process BIAS files
+    ##-------------------------------------------------------------------------
+    biases = t[t['imtype'] == 'BIAS']
+    print(f'Processing {len(biases)} BIAS files')
+    for file in biases['file']:
+        print(f'  Reading {file}')
+        MEF = fits_MEFdata_reader(file)
+        print(f'  Creating deviation')
+        MEF.create_deviation()
+        print(f'  Gain correcting')
+        MEF.gain_correct()
 
 
 if __name__ == '__main__':
