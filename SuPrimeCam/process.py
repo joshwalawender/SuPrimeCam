@@ -4,6 +4,7 @@
 from pathlib import Path
 import logging
 
+import numpy as np
 from astropy import units as u
 from astropy.io import fits
 from astropy.nddata import CCDData
@@ -134,6 +135,57 @@ class MEFData(object):
             gain = pd.header.get('GAIN')
             self.pixeldata[i] = ccdproc.gain_correct(pd, gain*u.electron/u.adu)
 
+    def bias_subtract(self, master_bias):
+        for i,pd in enumerate(self.pixeldata):
+            self.pixeldata[i] = ccdproc.subtract_bias(pd, master_bias)
+
+    def write(self):
+        '''Assemble in to chips and write as 10 extension MEF.
+        '''
+        for chip in range(0,10):
+            ext0 = chip*4
+            x0s = []
+            x1s = []
+            y0s = []
+            y1s = []
+            for ext in range(chip*4, (chip+1)*4):
+                hdr = self.headers[ext+1]
+                assert hdr.get('DET-ID') == chip
+                detsec = hdr.get('DETSEC')[1:-1]
+                x0, x1 = detsec.split(',')[0].split(':')
+                y0, y1 = detsec.split(',')[1].split(':')
+                x0s.append(int(x0))
+                x1s.append(int(x1))
+                y0s.append(int(y0))
+                y1s.append(int(y1))
+            chip_xrange = [min(x0s), max(x1s)]
+            chip_yrange = [min(y0s), max(y1s)]
+            chip_size = [max(x1s)-min(x0s), max(y1s)-min(y0s)]
+            chip_x0s = [x-min(x0s) for x in x0s]
+            chip_x1s = [x-min(x0s) for x in x1s]
+#             print(chip, chip_x0s)
+#             print(chip, chip_x1s)
+#             print(chip, y0s)
+#             print(chip, y1s)
+#             print(chip_size)
+
+            chip_data = np.zeros((chip_size[1]+1, chip_size[0]+1))
+            for i,ext in enumerate(range(chip*4, (chip+1)*4)):
+                print(i, ext)
+                chip_data[:,chip_x0s[i]:chip_x1s[i]+1] = self.pixeldata[ext].data
+
+            chip_hdu = fits.ImageHDU(chip_data, self.headers[ext0+1])
+#             print(chip_hdu.data.shape)
+#             print(chip_hdu)
+
+#             from matplotlib import pyplot as plt
+#             from astropy.visualization import PercentileInterval, ImageNormalize
+#             norm = ImageNormalize(chip_hdu.data, interval=PercentileInterval(98))
+#             plt.figure(figsize=(5,15))
+#             plt.imshow(chip_hdu.data, origin='lower', norm=norm)
+#             plt.show()
+
+
 
 ##-------------------------------------------------------------------------
 ## Get HDU Type
@@ -254,17 +306,23 @@ def process(MEF40path):
         print(f"Reading {tablefile}")
         t = Table.read(tablefile, format='ascii.csv')
     else:
-        t = Table(names=('file', 'imtype'),
-                  dtype=('a200',  'a12') )
+        t = Table(names=('file', 'imtype', 'filter'),
+                  dtype=('a200',  'a12', 'a12') )
         for file in MEF40path.glob('MEF*.fits'):
             MEF = fits_MEFdata_reader(file)
-            t.add_row((file, MEF.get('DATA-TYP')))
+            t.add_row((file, MEF.get('DATA-TYP'), MEF.get('FILTER01')))
         t.write(tablefile, format='ascii.csv')
 
-    print(t)
+#     print(t)
+
+    print('Testing write functionality')
+    images_i = t[(t['imtype'] == 'OBJECT') & (t['filter'] == 'W-S-I+')]
+    MEF = fits_MEFdata_reader(images_i[0]['file'])
+    MEF.write()
+    import sys ; sys.exit(0)
 
     ##-------------------------------------------------------------------------
-    ## Process BIAS files
+    ## Build Master Bias
     ##-------------------------------------------------------------------------
     biases = t[t['imtype'] == 'BIAS']
     print(f'Processing {len(biases)} BIAS files')
@@ -285,6 +343,52 @@ def process(MEF40path):
             clip_extrema=True, nlow=1, nhigh=1)
 
     print(master_bias)
+
+    ##-------------------------------------------------------------------------
+    ## Build Master DOMEFLAT (i filter)
+    ##-------------------------------------------------------------------------
+    domeflats_i = t[(t['imtype'] == 'DOMEFLAT') & (t['filter'] == 'W-S-I+')]
+    print(f'Processing {len(domeflats)} DOMEFLAT files in the i filter')
+    domeflat_i_MEFs = []
+    for file in domeflats_i['file']:
+        print(f'  Reading {file}')
+        MEF = fits_MEFdata_reader(file)
+        print(f'  Creating deviation')
+        MEF.create_deviation()
+        print(f'  Gain correcting')
+        MEF.gain_correct()
+        print(f'  Bias subtracting')
+        MEF.bias_subtract(master_bias)
+        domeflat_i_MEFs.append(MEF)
+
+    master_flat_i = domeflat_i_MEFs[0]
+    for i,pd in enumerate(master_flat_i.pixeldata):
+        pds = [im.pixeldata[i] for im in domeflat_i_MEFs]
+        
+        master_flat_i.pixeldata[i] = ccdproc.combine(pds, method='average',
+            sigma_clip=True, sigma_clip_low_thresh=5, sigma_clip_high_thresh=5,
+            scale=np.median)
+
+    print(master_flat_i)
+
+    ##-------------------------------------------------------------------------
+    ## Process Science Frames (i filter)
+    ##-------------------------------------------------------------------------
+    images_i = t[(t['imtype'] == 'OBJECT') & (t['filter'] == 'W-S-I+')]
+    print(f'Processing {len(images_i)} OBJECT files in the i filter')
+    images_i_MEFs = []
+    for file in images_i['file']:
+        print(f'  Reading {file}')
+        MEF = fits_MEFdata_reader(file)
+        print(f'  Creating deviation')
+        MEF.create_deviation()
+        print(f'  Gain correcting')
+        MEF.gain_correct()
+        print(f'  Bias subtracting')
+        MEF.bias_subtract(master_bias)
+        images_i_MEFs.append(MEF)
+
+
 
 if __name__ == '__main__':
     MEF40path = Path('/Volumes/ScienceData/SuPrimeCam/SuPrimeCam_S17A-UH16A/Processed/MEF')
