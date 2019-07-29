@@ -268,6 +268,7 @@ def process(MEF40path):
     ##-------------------------------------------------------------------------
     biases = t[t['imtype'] == 'BIAS']
     print(f'Processing {len(biases)} BIAS files')
+    bias_MEFs = []
     for file in biases['file']:
         print(f'  Reading {file}')
         MEF = fits_MEFdata_reader(file)
@@ -275,7 +276,15 @@ def process(MEF40path):
         MEF.create_deviation()
         print(f'  Gain correcting')
         MEF.gain_correct()
+        bias_MEFs.append(MEF)
 
+    master_bias = bias_MEFs[0]
+    for i,pd in enumerate(master_bias.pixeldata):
+        pds = [bias.pixeldata[i] for bias in bias_MEFs]
+        master_bias.pixeldata[i] = ccdproc.combine(pds, method='average',
+            clip_extrema=True, nlow=1, nhigh=1)
+
+    print(master_bias)
 
 if __name__ == '__main__':
     MEF40path = Path('/Volumes/ScienceData/SuPrimeCam/SuPrimeCam_S17A-UH16A/Processed/MEF')
