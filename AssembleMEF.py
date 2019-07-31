@@ -68,7 +68,7 @@ def assemble_MEF(file0, outdir=None):
 #             maxy = max([maxyos[ch], maxyef[ch]])
 #             maxx = max([maxxos[ch], maxxef[ch]])
 #             chdata = hdul[0].data[miny:maxy,minx:maxx]
-            chdata = hdul[0].data[minyef[ch]:maxyef[ch],minxef[ch]:maxxef[ch]]
+            chdata = hdul[0].data[minyef[ch]-1:maxyef[ch],minxef[ch]-1:maxxef[ch]]
             if extver == 1:
                 phdu = fits.PrimaryHDU(None, hdul[0].header)
                 MEF.append(phdu)
