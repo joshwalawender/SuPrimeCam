@@ -178,12 +178,12 @@ class MEFData(object):
 #             print(chip_hdu.data.shape)
 #             print(chip_hdu)
 
-#             from matplotlib import pyplot as plt
-#             from astropy.visualization import PercentileInterval, ImageNormalize
-#             norm = ImageNormalize(chip_hdu.data, interval=PercentileInterval(98))
-#             plt.figure(figsize=(5,15))
-#             plt.imshow(chip_hdu.data, origin='lower', norm=norm)
-#             plt.show()
+            from matplotlib import pyplot as plt
+            from astropy.visualization import PercentileInterval, ImageNormalize
+            norm = ImageNormalize(chip_hdu.data, interval=PercentileInterval(98))
+            plt.figure(figsize=(5,15))
+            plt.imshow(chip_hdu.data, origin='lower', norm=norm)
+            plt.show()
 
 
 
@@ -306,18 +306,23 @@ def process(MEF40path):
         print(f"Reading {tablefile}")
         t = Table.read(tablefile, format='ascii.csv')
     else:
-        t = Table(names=('file', 'imtype', 'filter'),
-                  dtype=('a200',  'a12', 'a12') )
+        t = Table(names=('file', 'imtype', 'filter', 'object'),
+                  dtype=('a200',  'a12', 'a12', 'a50') )
         for file in MEF40path.glob('MEF*.fits'):
             MEF = fits_MEFdata_reader(file)
-            t.add_row((file, MEF.get('DATA-TYP'), MEF.get('FILTER01')))
+            t.add_row((file, MEF.get('DATA-TYP'), MEF.get('FILTER01'),
+                       MEF.get('OBJECT')))
         t.write(tablefile, format='ascii.csv')
 
 #     print(t)
 
     print('Testing write functionality')
-    images_i = t[(t['imtype'] == 'OBJECT') & (t['filter'] == 'W-S-I+')]
-    MEF = fits_MEFdata_reader(images_i[0]['file'])
+    images_i = t[(t['imtype'] == 'OBJECT')
+               & (t['filter'] == 'W-S-I+')
+               & (t['object'] == 'RhoOph1')]
+    file = images_i[0]['file']
+    print(f"  Using: {file}")
+    MEF = fits_MEFdata_reader(file)
     MEF.write()
     import sys ; sys.exit(0)
 
