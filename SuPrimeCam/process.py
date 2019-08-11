@@ -11,6 +11,7 @@ from astropy.nddata import CCDData
 from astropy.table import Table
 
 import ccdproc
+from ccdproc.utils.slices import slice_from_string
 
 ##-------------------------------------------------------------------------
 ## Create logger object
@@ -72,6 +73,7 @@ class MEFData(object):
         self.pixeldata = []
         self.tabledata = []
         self.headers = []
+        self.MEFhdul = None
 
     def verify(self):
         """Method to check the data against expectations. For the 
@@ -135,13 +137,20 @@ class MEFData(object):
             gain = pd.header.get('GAIN')
             self.pixeldata[i] = ccdproc.gain_correct(pd, gain*u.electron/u.adu)
 
+    def la_cosmic(self, sigclip=5):
+        for i,pd in enumerate(self.pixeldata):
+            self.pixeldata[i] = ccdproc.cosmicray_lacosmic(pd, sigclip=sigclip)
+
     def bias_subtract(self, master_bias):
         for i,pd in enumerate(self.pixeldata):
-            self.pixeldata[i] = ccdproc.subtract_bias(pd, master_bias)
+            self.pixeldata[i] = ccdproc.subtract_bias(pd, master_bias.pixeldata[i])
 
-    def write(self):
-        '''Assemble in to chips and write as 10 extension MEF.
-        '''
+    def flat_correct(self, master_flat):
+        for i,pd in enumerate(self.pixeldata):
+            self.pixeldata[i] = ccdproc.flat_correct(pd, master_flat.pixeldata[i])
+
+    def assemble(self):
+        MEFhdul = [fits.PrimaryHDU(data=None, header=self.headers[0])]
         for chip in range(0,10):
             ext0 = chip*4
             x0s = []
@@ -151,39 +160,48 @@ class MEFData(object):
             for ext in range(chip*4, (chip+1)*4):
                 hdr = self.headers[ext+1]
                 assert hdr.get('DET-ID') == chip
-                detsec = hdr.get('DETSEC')[1:-1]
-                x0, x1 = detsec.split(',')[0].split(':')
-                y0, y1 = detsec.split(',')[1].split(':')
-                x0s.append(int(x0))
-                x1s.append(int(x1))
-                y0s.append(int(y0))
-                y1s.append(int(y1))
+                detsec = slice_from_string(hdr.get('DETSEC'), fits_convention=True)
+                x0s.append(detsec[1].start)
+                x1s.append(detsec[1].stop)
+                y0s.append(detsec[0].start)
+                y1s.append(detsec[0].stop)
             chip_xrange = [min(x0s), max(x1s)]
             chip_yrange = [min(y0s), max(y1s)]
             chip_size = [max(x1s)-min(x0s), max(y1s)-min(y0s)]
             chip_x0s = [x-min(x0s) for x in x0s]
             chip_x1s = [x-min(x0s) for x in x1s]
-#             print(chip, chip_x0s)
-#             print(chip, chip_x1s)
-#             print(chip, y0s)
-#             print(chip, y1s)
-#             print(chip_size)
 
             chip_data = np.zeros((chip_size[1]+1, chip_size[0]+1))
             for i,ext in enumerate(range(chip*4, (chip+1)*4)):
-                print(i, ext)
                 chip_data[:,chip_x0s[i]:chip_x1s[i]+1] = self.pixeldata[ext].data
 
             chip_hdu = fits.ImageHDU(chip_data, self.headers[ext0+1])
-#             print(chip_hdu.data.shape)
-#             print(chip_hdu)
+            MEFhdul.append(chip_hdu)
+        self.MEFhdul = fits.HDUList(MEFhdul)
+        return MEFhdul
 
-            from matplotlib import pyplot as plt
-            from astropy.visualization import PercentileInterval, ImageNormalize
-            norm = ImageNormalize(chip_hdu.data, interval=PercentileInterval(98))
-            plt.figure(figsize=(5,15))
-            plt.imshow(chip_hdu.data, origin='lower', norm=norm)
-            plt.show()
+
+    def to_hdul(self):
+        assert len(self.pixeldata) == 10
+        MEFhdul = [fits.PrimaryHDU(data=None, header=self.headers[0])]
+        for i,pd in enumerate(self.pixeldata):
+            hdu = pd.to_hdu()[0]
+            hdu = fits.ImageHDU(data=hdu.data, header=hdu.header)
+            MEFhdul.append(hdu)
+        self.MEFhdul = fits.HDUList(MEFhdul)
+
+
+    def write(self, file):
+        '''Assemble in to chips and write as 10 extension MEF.
+        '''
+        if self.MEFhdul is None:
+            if len(self.pixeldata) == 10:
+                self.to_hdul()
+            elif len(self.pixeldata) == 40:
+                self.assemble()
+        self.MEFhdul.writeto(file)
+
+
 
 
 
@@ -225,31 +243,7 @@ def get_hdu_type(hdu):
 ##-------------------------------------------------------------------------
 ## MEFData Reader
 ##-------------------------------------------------------------------------
-def fits_MEFdata_reader(file, defaultunit='adu', datatype=MEFData):
-    """A reader for MEFData objects.
-    
-    Currently this is a separate function, but should probably be
-    registered as a reader similar to fits_ccddata_reader.
-    
-    Arguments:
-    file -- The filename (or pathlib.Path) of the FITS file to open.
-    Keyword arguments:
-    defaultunit -- If the BUNIT keyword is unable to be located or
-                   parsed, the reader will assume this unit.  Defaults
-                   to "adu".
-    datatype -- The output datatype.  Defaults to MEFData, but could
-                be a subclass such as MOSFIREData.  The main effect of
-                this is that it runs the appropriate verify method on
-                the data.
-    """
-    try:
-        hdul = fits.open(file, 'readonly')
-    except FileNotFoundError as e:
-        print(e.msg)
-        raise e
-    except OSError as e:
-        print(e.msg)
-        raise e
+def read_hdul(hdul, defaultunit='adu', datatype=MEFData):
     # Loop though HDUs and read them in as pixel data or table data
     md = datatype()
     while len(hdul) > 0:
@@ -294,108 +288,166 @@ def fits_MEFdata_reader(file, defaultunit='adu', datatype=MEFData):
     return md
 
 
+def fits_MEFdata_reader(file, defaultunit='adu', datatype=MEFData):
+    """A reader for MEFData objects.
+    
+    Currently this is a separate function, but should probably be
+    registered as a reader similar to fits_ccddata_reader.
+    
+    Arguments:
+    file -- The filename (or pathlib.Path) of the FITS file to open.
+    Keyword arguments:
+    defaultunit -- If the BUNIT keyword is unable to be located or
+                   parsed, the reader will assume this unit.  Defaults
+                   to "adu".
+    datatype -- The output datatype.  Defaults to MEFData, but could
+                be a subclass such as MOSFIREData.  The main effect of
+                this is that it runs the appropriate verify method on
+                the data.
+    """
+    try:
+        hdul = fits.open(file, 'readonly')
+    except FileNotFoundError as e:
+        print(e.msg)
+        raise e
+    except OSError as e:
+        print(e.msg)
+        raise e
+    md = read_hdul(hdul, defaultunit=defaultunit, datatype=datatype)
+    return md
+
+
 ##-------------------------------------------------------------------------
 ## Main Program
 ##-------------------------------------------------------------------------
-def process(MEF40path):
-    MEF40path = Path(MEF40path).expanduser()
+def process(MEFpath):
+#     filters = ['i', 'Ha', 'SII']
+    filters = ['i', 'SII']
+    filternames = {'i': 'W-S-I+',
+                   'Ha': 'N-A-L656',
+                   'SII': 'N-A-L671'}
+
+    MEFpath = Path(MEFpath).expanduser()
 
     # Create table of files
-    tablefile = MEF40path.parent.joinpath('files.txt')
+    tablefile = MEFpath.parent.joinpath('files.txt')
     if tablefile.exists() is True:
         print(f"Reading {tablefile}")
         t = Table.read(tablefile, format='ascii.csv')
     else:
         t = Table(names=('file', 'imtype', 'filter', 'object'),
                   dtype=('a200',  'a12', 'a12', 'a50') )
-        for file in MEF40path.glob('MEF*.fits'):
+        for file in MEFpath.glob('MEF*.fits'):
             MEF = fits_MEFdata_reader(file)
             t.add_row((file, MEF.get('DATA-TYP'), MEF.get('FILTER01'),
                        MEF.get('OBJECT')))
         t.write(tablefile, format='ascii.csv')
 
-#     print(t)
-
-    print('Testing write functionality')
-    images_i = t[(t['imtype'] == 'OBJECT')
-               & (t['filter'] == 'W-S-I+')
-               & (t['object'] == 'RhoOph1')]
-    file = images_i[0]['file']
-    print(f"  Using: {file}")
-    MEF = fits_MEFdata_reader(file)
-    MEF.write()
-    import sys ; sys.exit(0)
 
     ##-------------------------------------------------------------------------
     ## Build Master Bias
     ##-------------------------------------------------------------------------
-    biases = t[t['imtype'] == 'BIAS']
-    print(f'Processing {len(biases)} BIAS files')
-    bias_MEFs = []
-    for file in biases['file']:
-        print(f'  Reading {file}')
-        MEF = fits_MEFdata_reader(file)
-        print(f'  Creating deviation')
-        MEF.create_deviation()
-        print(f'  Gain correcting')
-        MEF.gain_correct()
-        bias_MEFs.append(MEF)
+    master_bias_file = MEFpath.parent.joinpath('MasterBias.fits')
+    if master_bias_file.exists():
+        print(f"Reading Master Bias: {master_bias_file}")
+        master_bias = fits_MEFdata_reader(master_bias_file)
+    else:
+        biases = t[t['imtype'] == 'BIAS']
+        print(f'Processing {len(biases)} BIAS files')
+        bias_MEFs = []
+        for i,file in enumerate(biases['file']):
+            file = Path(file).expanduser()
+            print(f'  Reading {i+1:3d}/{len(biases):3d}: {file}')
+            MEF = fits_MEFdata_reader(file)
+            print(f'    Creating deviation')
+            MEF.create_deviation()
+            print(f'    Gain correcting')
+            MEF.gain_correct()
+            bias_MEFs.append(MEF)
+        print(f"Building master bias")
+        master_bias = bias_MEFs[0]
+        for i,pd in enumerate(master_bias.pixeldata):
+            pds = [bias.pixeldata[i] for bias in bias_MEFs]
+            master_bias.pixeldata[i] = ccdproc.combine(pds, method='average',
+                clip_extrema=True, nlow=1, nhigh=1)
+        print(f"Writing: {master_bias_file}")
+        master_bias.write(master_bias_file)
 
-    master_bias = bias_MEFs[0]
-    for i,pd in enumerate(master_bias.pixeldata):
-        pds = [bias.pixeldata[i] for bias in bias_MEFs]
-        master_bias.pixeldata[i] = ccdproc.combine(pds, method='average',
-            clip_extrema=True, nlow=1, nhigh=1)
-
-    print(master_bias)
 
     ##-------------------------------------------------------------------------
     ## Build Master DOMEFLAT (i filter)
     ##-------------------------------------------------------------------------
-    domeflats_i = t[(t['imtype'] == 'DOMEFLAT') & (t['filter'] == 'W-S-I+')]
-    print(f'Processing {len(domeflats)} DOMEFLAT files in the i filter')
-    domeflat_i_MEFs = []
-    for file in domeflats_i['file']:
-        print(f'  Reading {file}')
-        MEF = fits_MEFdata_reader(file)
-        print(f'  Creating deviation')
-        MEF.create_deviation()
-        print(f'  Gain correcting')
-        MEF.gain_correct()
-        print(f'  Bias subtracting')
-        MEF.bias_subtract(master_bias)
-        domeflat_i_MEFs.append(MEF)
+    master_flats = {}
+    for filt in filters:
+        master_flat_file = MEFpath.parent.joinpath(f'DomeFlat_{filt}.fits')
+        if master_flat_file.exists():
+            print(f"Reading Master Flat: {master_flat_file}")
+            master_flats[filt] = fits_MEFdata_reader(master_flat_file)
+        else:
+            domeflats = t[(t['imtype'] == 'DOMEFLAT')\
+                        & (t['filter'] == filternames[filt])]
+            print(f'Found {len(domeflats)} DOMEFLAT files in the {filt} filter')
+            domeflat_MEFs = []
+            for i,file in enumerate(domeflats['file']):
+                file = Path(file).expanduser()
+                print(f'  Reading {i+1:3d}/{len(domeflats):3d}: {file.name}')
+                MEF = fits_MEFdata_reader(file)
+                print(f'    Creating deviation')
+                MEF.create_deviation()
+                print(f'    Gain correcting')
+                MEF.gain_correct()
+                print(f'    Assemble Chips')
+                MEF = read_hdul(MEF.assemble())
+                print(f'    Bias subtracting')
+                MEF.bias_subtract(master_bias)
+                domeflat_MEFs.append(MEF)
 
-    master_flat_i = domeflat_i_MEFs[0]
-    for i,pd in enumerate(master_flat_i.pixeldata):
-        pds = [im.pixeldata[i] for im in domeflat_i_MEFs]
-        
-        master_flat_i.pixeldata[i] = ccdproc.combine(pds, method='average',
-            sigma_clip=True, sigma_clip_low_thresh=5, sigma_clip_high_thresh=5,
-            scale=np.median)
+            print(f"Generating Master Flat for {filt} Filter")
+            master_flat = domeflat_MEFs[0]
+            for i,pd in enumerate(master_flat.pixeldata):
+                pds = [im.pixeldata[i] for im in domeflat_MEFs]
+            master_flat.pixeldata[i] = ccdproc.combine(pds, method='average',
+                sigma_clip=True, sigma_clip_low_thresh=5, sigma_clip_high_thresh=5,
+                scale=np.median)
+            master_flats[filt] = master_flat
+            print(f"Writing: {master_flat_file}")
+            master_flat.write(master_flat_file)
 
-    print(master_flat_i)
 
     ##-------------------------------------------------------------------------
     ## Process Science Frames (i filter)
     ##-------------------------------------------------------------------------
-    images_i = t[(t['imtype'] == 'OBJECT') & (t['filter'] == 'W-S-I+')]
-    print(f'Processing {len(images_i)} OBJECT files in the i filter')
-    images_i_MEFs = []
-    for file in images_i['file']:
-        print(f'  Reading {file}')
-        MEF = fits_MEFdata_reader(file)
-        print(f'  Creating deviation')
-        MEF.create_deviation()
-        print(f'  Gain correcting')
-        MEF.gain_correct()
-        print(f'  Bias subtracting')
-        MEF.bias_subtract(master_bias)
-        images_i_MEFs.append(MEF)
+    outdir = MEFpath.parent.joinpath('MEF10')
+    for filt in filters:
+        images = t[(t['imtype'] == 'OBJECT')\
+                 & (t['filter'] == filternames[filt])]
+        print(f'Processing {len(images)} OBJECT files in the {filt} filter')
+        image_MEFs = []
 
+
+        for i,file in enumerate(images['file']):
+            file = Path(file).expanduser()
+            print(f'  Reading {i+1:3d}/{len(images):3d}: {file.name}')
+            MEF = fits_MEFdata_reader(file)
+            print(f'    Creating deviation')
+            MEF.create_deviation()
+            print(f'    Gain correcting')
+            MEF.gain_correct()
+#             print(f'    Cosmic ray cleaning')
+#             MEF.la_cosmic()
+            print(f'    Assemble Chips')
+            MEF = read_hdul(MEF.assemble())
+            print(f'    Bias subtracting')
+            MEF.bias_subtract(master_bias)
+            print(f'    Flat fielding')
+            MEF.flat_correct(master_flats[filt])
+            outfile = outdir.joinpath(file.name)
+            print(f'  Writing: {outfile}')
+            MEF.write(outfile)
 
 
 if __name__ == '__main__':
-    MEF40path = Path('/Volumes/ScienceData/SuPrimeCam/SuPrimeCam_S17A-UH16A/Processed/MEF')
+#     MEFpath = Path('/Volumes/ScienceData/SuPrimeCam/SuPrimeCam_S17A-UH16A/Processed/MEF')
+    MEFpath = Path('~/Sync/ScienceData/SuPrimeCam/MEF').expanduser()
 
-    process(MEF40path)
+    process(MEFpath)
