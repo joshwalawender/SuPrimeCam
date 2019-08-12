@@ -184,8 +184,11 @@ class MEFData(object):
                 chip_data[:,chip_x0s[i]:chip_x1s[i]+1] = self.pixeldata[ext].data
 
             chip_hdu = fits.ImageHDU(chip_data, self.headers[ext0+1])
-            chip_hdu.header.set('DATASEC', '[1:{chip_size[0]},1:{chip_size[1]}]')
-            chip_hdu.header.set('CCDSEC', '[1:{chip_size[0]},1:{chip_size[1]}]')
+            chip_hdu.header.set('DETSEC', f'[{chip_xrange[0]+1}:{chip_xrange[1]+1},'\
+                                          f'{chip_yrange[0]+1}:{chip_yrange[1]+1}]')
+            chip_hdu.header.set('DATASEC', f'[1:{chip_size[0]+1},1:{chip_size[1]+1}]')
+            chip_hdu.header.set('CCDSEC', f'[1:{chip_size[0]+1},1:{chip_size[1]+1}]')
+            chip_hdu.header.set('BUNIT', str(self.pixeldata[0].unit))
             MEFhdul.append(chip_hdu)
         self.MEFhdul = fits.HDUList(MEFhdul)
         return MEFhdul
@@ -373,7 +376,10 @@ def process(MEFpath):
             MEF.create_deviation()
             print(f'    Gain correcting')
             MEF.gain_correct()
+            print(f'    Assembling Chips')
+            MEF = read_hdul(MEF.assemble())
             bias_MEFs.append(MEF)
+
         print(f"Building master bias")
         master_bias = bias_MEFs[0]
         for i,pd in enumerate(master_bias.pixeldata):
@@ -382,6 +388,7 @@ def process(MEFpath):
                 clip_extrema=True, nlow=1, nhigh=1)
         print(f"Writing: {master_bias_file}")
         master_bias.write(master_bias_file)
+        master_bias = fits_MEFdata_reader(master_bias_file)
 
 
     ##-------------------------------------------------------------------------
