@@ -161,6 +161,13 @@ class MEFData(object):
                 hdr = self.headers[ext+1]
                 assert hdr.get('DET-ID') == chip
                 detsec = slice_from_string(hdr.get('DETSEC'), fits_convention=True)
+                datasec = slice_from_string(hdr.get('DATASEC'), fits_convention=True)
+                ccdsec = slice_from_string(hdr.get('CCDSEC'), fits_convention=True)
+#                 print(hdr.get('CCDNAME'))
+#                 print(ext, detsec)
+#                 print(ext, datasec)
+#                 print(ext, ccdsec)
+                
                 x0s.append(detsec[1].start)
                 x1s.append(detsec[1].stop)
                 y0s.append(detsec[0].start)
@@ -170,12 +177,15 @@ class MEFData(object):
             chip_size = [max(x1s)-min(x0s), max(y1s)-min(y0s)]
             chip_x0s = [x-min(x0s) for x in x0s]
             chip_x1s = [x-min(x0s) for x in x1s]
+#             print(f"chip xrange: {chip_xrange}")
 
             chip_data = np.zeros((chip_size[1]+1, chip_size[0]+1))
             for i,ext in enumerate(range(chip*4, (chip+1)*4)):
                 chip_data[:,chip_x0s[i]:chip_x1s[i]+1] = self.pixeldata[ext].data
 
             chip_hdu = fits.ImageHDU(chip_data, self.headers[ext0+1])
+            chip_hdu.header.set('DATASEC', '[1:{chip_size[0]},1:{chip_size[1]}]')
+            chip_hdu.header.set('CCDSEC', '[1:{chip_size[0]},1:{chip_size[1]}]')
             MEFhdul.append(chip_hdu)
         self.MEFhdul = fits.HDUList(MEFhdul)
         return MEFhdul
@@ -396,7 +406,7 @@ def process(MEFpath):
                 MEF.create_deviation()
                 print(f'    Gain correcting')
                 MEF.gain_correct()
-                print(f'    Assemble Chips')
+                print(f'    Assembling Chips')
                 MEF = read_hdul(MEF.assemble())
                 print(f'    Bias subtracting')
                 MEF.bias_subtract(master_bias)
@@ -435,7 +445,7 @@ def process(MEFpath):
             MEF.gain_correct()
 #             print(f'    Cosmic ray cleaning')
 #             MEF.la_cosmic()
-            print(f'    Assemble Chips')
+            print(f'    Assembling Chips')
             MEF = read_hdul(MEF.assemble())
             print(f'    Bias subtracting')
             MEF.bias_subtract(master_bias)
